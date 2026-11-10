@@ -1,4 +1,7 @@
 from concurrent.futures import ThreadPoolExecutor
+from datetime import timedelta
+import hashlib
+import random
 from urllib.parse import urlencode
 
 from django.contrib import messages
@@ -7,12 +10,14 @@ from django.db.models import Max
 from django.http import Http404, QueryDict
 from django.shortcuts import redirect, render
 from django.urls import reverse
+from django.utils import timezone
 from django.views.decorators.http import require_POST
 
+from accounts.models import UserProfile
 from community.models import PlaceEnrichment, PlaceReview
 from restaurants.diet_filters import ALLERGY_CHOICES
 from restaurants.inspections import _latest, _match, _restaurants_in_zip, google_zip
-from restaurants.places import PlacesError, find_restaurant_place
+from restaurants.places import PlacesError, find_restaurant_place, get_restaurants
 from search import find_food
 from search.forms import (
     FARMERS_MARKET,
@@ -251,6 +256,98 @@ def _top_picks(count=3):
     return picks
 
 
+def _nearby_top_picks(profile, count=3):
+    """Select nearby Grade-A places, rotating the saved place IDs every 24 hours."""
+    now = timezone.now()
+    location_key = hashlib.sha256(
+        (
+            f"{profile.last_location_latitude:.4f},"
+            f"{profile.last_location_longitude:.4f}"
+        ).encode()
+    ).hexdigest()
+    try:
+        nearby = get_restaurants(
+            lat=profile.last_location_latitude,
+            lng=profile.last_location_longitude,
+            radius_m=5000,
+        )
+    except PlacesError:
+        return []
+
+    candidates = []
+    seen = set()
+    for google in nearby:
+        zipcode = google_zip(google.get("address"))
+        if not zipcode:
+            continue
+        camis = _match(
+            google.get("name", ""),
+            google.get("address", ""),
+            _restaurants_in_zip(zipcode),
+        )
+        if not camis or camis in seen:
+            continue
+        inspection = _latest(camis)
+        if not inspection or inspection.get("grade") != "A":
+            continue
+        seen.add(camis)
+        candidates.append(
+            {
+                "camis": camis,
+                "name": google.get("name", ""),
+                "boro": "",
+                "street": google.get("street", ""),
+                "zipcode": zipcode,
+                "cuisine": RestaurantInspection.objects.filter(camis=camis)
+                .exclude(cuisine="")
+                .order_by("-inspection_date")
+                .values_list("cuisine", flat=True)
+                .first(),
+                "google": google,
+                "photo_url": _photo_url_for(google),
+                "inspection": inspection,
+                "review": google.get("review"),
+                "image": "search/images/nyc-restaurant.jpg",
+            }
+        )
+
+    if not candidates:
+        return []
+
+    selected_ids = profile.top_picks_place_ids or []
+    location_changed = location_key != profile.top_picks_location_key
+    rotation_due = (
+        profile.top_picks_selected_at is None
+        or now - profile.top_picks_selected_at >= timedelta(hours=24)
+        or location_changed
+    )
+    candidate_ids = {pick["google"].get("id") for pick in candidates}
+
+    if not rotation_due and set(selected_ids).issubset(candidate_ids):
+        selected = [
+            next(pick for pick in candidates if pick["google"].get("id") == place_id)
+            for place_id in selected_ids
+        ]
+        return selected[:count]
+
+    alternatives = [
+        pick for pick in candidates if pick["google"].get("id") not in selected_ids
+    ]
+    pool = alternatives or candidates
+    selected = random.sample(pool, min(count, len(pool)))
+    profile.top_picks_place_ids = [pick["google"].get("id") for pick in selected]
+    profile.top_picks_selected_at = now
+    profile.top_picks_location_key = location_key
+    profile.save(
+        update_fields=[
+            "top_picks_place_ids",
+            "top_picks_selected_at",
+            "top_picks_location_key",
+        ]
+    )
+    return selected
+
+
 def home(request):
     selected_boro = request.GET.get("boro", "").strip()
     borough_options = list(
@@ -302,7 +399,17 @@ def home(request):
     # don't slow down paginated browsing.
     top_picks = []
     if not selected_boro and page_obj.number == 1:
-        top_picks = _top_picks(count=3)
+        profile = None
+        if request.user.is_authenticated:
+            profile = UserProfile.objects.filter(user=request.user).first()
+        if (
+            profile
+            and profile.last_location_latitude is not None
+            and profile.last_location_longitude is not None
+        ):
+            top_picks = _nearby_top_picks(profile, count=3)
+        else:
+            top_picks = _top_picks(count=3)
 
     return render(
         request,
