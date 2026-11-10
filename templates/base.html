@@ -58,6 +58,21 @@
         {% endfor %}
       </ul>
     {% endif %}
+    {% if user.is_authenticated and request.session.show_daily_deal_optin %}
+      <aside class="daily-deal-alert" id="daily-deal-alert" role="region" aria-label="Daily promotions email" data-prompt-key="{{ request.session.daily_deal_prompt_key }}">
+        <p class="daily-deal-alert__title">Email me daily Promotions and exciting offers</p>
+        <p>Would you like to receive one daily email with nearby restaurant offers?</p>
+        <form id="daily-deal-preference-form" method="post" action="{% url 'accounts:capture_location' %}">
+          {% csrf_token %}
+          <input type="hidden" name="daily_email_opt_in" id="daily-deal-choice" value="">
+          <div class="daily-deal-alert__actions">
+            <button type="button" class="btn" data-daily-deal-choice="yes">Yes, email me</button>
+            <button type="button" class="btn btn-secondary" data-daily-deal-choice="no">No thanks</button>
+          </div>
+        </form>
+        <p class="daily-deal-alert__status" id="daily-deal-status" aria-live="polite"></p>
+      </aside>
+    {% endif %}
     {% block content %}{% endblock %}
   </main>
   <footer class="wrap site-footer">
@@ -73,6 +88,56 @@
     t.addEventListener('click', function () { window.scrollTo({ top: 0, behavior: 'smooth' }); });
   })();
 </script>
+{% if user.is_authenticated and request.session.show_daily_deal_optin %}
+<script>
+  (function () {
+    var alertBox = document.getElementById("daily-deal-alert");
+    var form = document.getElementById("daily-deal-preference-form");
+    var status = document.getElementById("daily-deal-status");
+    var buttons = form.querySelectorAll("[data-daily-deal-choice]");
+    var csrf = form.querySelector("[name=csrfmiddlewaretoken]").value;
+
+    function postData(data) {
+      return fetch(form.action, {
+        method: "POST",
+        headers: { "X-CSRFToken": csrf, "X-Requested-With": "XMLHttpRequest" },
+        body: data,
+        credentials: "same-origin"
+      });
+    }
+
+    buttons.forEach(function (button) {
+      button.addEventListener("click", function () {
+        buttons.forEach(function (item) { item.disabled = true; });
+        status.textContent = "Saving your choice…";
+        var data = new FormData(form);
+        data.set("daily_email_opt_in", button.dataset.dailyDealChoice);
+        postData(data).then(function (response) {
+          if (!response.ok) throw new Error("Could not save preference");
+          alertBox.remove();
+        }).catch(function () {
+          status.textContent = "Could not save your choice. Please try again.";
+          buttons.forEach(function (item) { item.disabled = false; });
+        });
+      });
+    });
+
+    var locationKey = "daily-location-requested-" + alertBox.dataset.promptKey;
+    if (!sessionStorage.getItem(locationKey)) {
+      sessionStorage.setItem(locationKey, "1");
+      if (navigator.geolocation) {
+        navigator.geolocation.getCurrentPosition(function (position) {
+          var data = new URLSearchParams();
+          data.set("csrfmiddlewaretoken", csrf);
+          data.set("latitude", position.coords.latitude);
+          data.set("longitude", position.coords.longitude);
+          postData(data).catch(function () {});
+        }, function () {}, { enableHighAccuracy: false, timeout: 10000, maximumAge: 0 });
+      }
+    }
+  })();
+</script>
+{% endif %}
 <script id="ui-titlecase">
   (function () {
     var KEEP = {NYC:1,BBQ:1,LLC:1,INC:1,USA:1,NY:1,BK:1,II:1,III:1,KFC:1,BX:1,DC:1,CO:1,LP:1,LTD:1,NE:1,NW:1,SE:1,SW:1};

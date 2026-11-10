@@ -843,3 +843,21 @@ tbody tr:hover { background: var(--raised); }
   .farmers-market-map,
   .combined-map { min-height: 360px; }
 }
+
+.daily-deal-alert {
+  position: fixed;
+  right: 1.25rem;
+  bottom: 1.25rem;
+  z-index: 1000;
+  width: min(25rem, calc(100vw - 2rem));
+  padding: 1.25rem;
+  color: var(--text, #20242a);
+  background: var(--surface, #fff);
+  border: 1px solid var(--border, #d8dce2);
+  border-radius: 14px;
+  box-shadow: 0 12px 36px rgb(0 0 0 / 24%);
+}
+.daily-deal-alert__title { margin: 0 0 .5rem; font-weight: 700; font-size: 1.1rem; }
+.daily-deal-alert p { margin-top: 0; }
+.daily-deal-alert__actions { display: flex; gap: .65rem; flex-wrap: wrap; }
+.daily-deal-alert__status { margin: .5rem 0 0; font-size: .85rem; }

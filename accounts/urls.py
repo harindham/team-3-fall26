@@ -1,8 +1,7 @@
-from urllib.parse import urlencode
+import secrets
 
 from django.contrib.auth.views import LoginView
-from django.shortcuts import redirect
-from django.urls import path, reverse
+from django.urls import path
 
 from accounts import views
 from accounts.forms import LoginForm
@@ -17,8 +16,9 @@ class ProfileLoginView(LoginView):
 
     def form_valid(self, form):
         response = super().form_valid(form)
-        capture_url = reverse("accounts:capture_location")
-        return redirect(f"{capture_url}?{urlencode({'next': response.url})}")
+        self.request.session["show_daily_deal_optin"] = True
+        self.request.session["daily_deal_prompt_key"] = secrets.token_urlsafe(12)
+        return response
 
 
 urlpatterns = [

@@ -1,16 +1,17 @@
+import secrets
+
 from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth import login, logout
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.models import User
 from django.core.mail import send_mail
-from django.http import HttpResponseBadRequest
+from django.http import HttpResponseBadRequest, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils.encoding import force_bytes, force_str
 from django.utils import timezone
 from django.utils.http import (
-    url_has_allowed_host_and_scheme,
     urlsafe_base64_decode,
     urlsafe_base64_encode,
 )
@@ -100,50 +101,51 @@ def verify_email(request, uidb64, token):
     login(
         request, user, backend="django.contrib.auth.backends.AllowAllUsersModelBackend"
     )
+    request.session["show_daily_deal_optin"] = True
+    request.session["daily_deal_prompt_key"] = secrets.token_urlsafe(12)
     messages.success(request, "Email confirmed. Welcome!")
-    return redirect("accounts:capture_location")
-
-
-def _safe_next_url(request, value):
-    if value and url_has_allowed_host_and_scheme(
-        value, allowed_hosts={request.get_host()}, require_https=request.is_secure()
-    ):
-        return value
-    return reverse("accounts:profile")
+    return redirect("accounts:profile")
 
 
 @login_required
+@require_POST
 def capture_location(request):
-    """Ask the newly signed-in user's browser for a location update."""
-    next_url = _safe_next_url(
-        request,
-        request.POST.get("next")
-        if request.method == "POST"
-        else request.GET.get("next"),
-    )
-    if request.method == "POST":
+    """Save a location update and/or a daily promotional email choice."""
+    profile, _created = UserProfile.objects.get_or_create(user=request.user)
+    update_fields = []
+
+    raw_latitude = request.POST.get("latitude", "").strip()
+    raw_longitude = request.POST.get("longitude", "").strip()
+    if bool(raw_latitude) != bool(raw_longitude):
+        return HttpResponseBadRequest("Both coordinates are required")
+    if raw_latitude and raw_longitude:
         try:
-            latitude = float(request.POST.get("latitude", ""))
-            longitude = float(request.POST.get("longitude", ""))
-        except (TypeError, ValueError):
+            latitude = float(raw_latitude)
+            longitude = float(raw_longitude)
+        except ValueError:
             return HttpResponseBadRequest("Invalid coordinates")
         if not (-90 <= latitude <= 90 and -180 <= longitude <= 180):
             return HttpResponseBadRequest("Invalid coordinates")
-
-        profile, _created = UserProfile.objects.get_or_create(user=request.user)
         profile.last_location_latitude = latitude
         profile.last_location_longitude = longitude
         profile.last_location_updated_at = timezone.now()
-        profile.save(
-            update_fields=[
+        update_fields.extend(
+            [
                 "last_location_latitude",
                 "last_location_longitude",
                 "last_location_updated_at",
             ]
         )
-        return redirect(next_url)
 
-    return render(request, "accounts/capture_location.html", {"next_url": next_url})
+    if "daily_email_opt_in" in request.POST:
+        profile.promo_opt_in = request.POST["daily_email_opt_in"] == "yes"
+        update_fields.append("promo_opt_in")
+        request.session.pop("show_daily_deal_optin", None)
+        request.session.pop("daily_deal_prompt_key", None)
+
+    if update_fields:
+        profile.save(update_fields=update_fields)
+    return JsonResponse({"ok": True})
 
 
 @login_required

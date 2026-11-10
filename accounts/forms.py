@@ -130,6 +130,7 @@ class UserProfileForm(forms.ModelForm):
         labels = {
             "picture": "Profile picture",
             "phone_number": "Phone number",
+            "promo_opt_in": "Email me daily Promotions and exciting offers",
             "home_address": "Place (home address)",
             "favorite_foods": "Favorite foods (comma separated)",
             "disliked_foods": "Disliked foods (comma separated)",
