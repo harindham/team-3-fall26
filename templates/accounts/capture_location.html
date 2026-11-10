@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+
+{% block title %}Update your location - NYC Food Search{% endblock %}
+
+{% block content %}
+<section class="form-section">
+  <h1>Update your location</h1>
+  <p id="location-status" class="muted">Requesting your location to save it to your profile…</p>
+  <p class="muted">Your browser will ask for permission. Your location is used to show nearby food options.</p>
+  <form id="location-form" method="post" action="{% url 'accounts:capture_location' %}">
+    {% csrf_token %}
+    <input type="hidden" name="latitude" id="location-latitude">
+    <input type="hidden" name="longitude" id="location-longitude">
+    <input type="hidden" name="next" value="{{ next_url }}">
+  </form>
+  <a id="continue-link" href="{{ next_url }}" hidden>Continue without updating</a>
+</section>
+{{ next_url|json_script:"next-location-url" }}
+{% endblock %}
+
+{% block scripts %}
+<script>
+  (function () {
+    var status = document.getElementById("location-status");
+    var form = document.getElementById("location-form");
+    var nextData = document.getElementById("next-location-url");
+    var nextUrl = nextData ? JSON.parse(nextData.textContent) : "/accounts/profile/";
+    var continueLink = document.getElementById("continue-link");
+    function continueWithoutLocation(message) {
+      status.textContent = message;
+      continueLink.href = nextUrl;
+      continueLink.hidden = false;
+    }
+    if (!navigator.geolocation) {
+      continueWithoutLocation("This browser cannot provide a location. You can continue without saving one.");
+      return;
+    }
+    navigator.geolocation.getCurrentPosition(function (position) {
+      document.getElementById("location-latitude").value = position.coords.latitude;
+      document.getElementById("location-longitude").value = position.coords.longitude;
+      form.submit();
+    }, function () {
+      continueWithoutLocation("Location access was not granted. You can continue without saving one.");
+    }, { enableHighAccuracy: false, timeout: 10000, maximumAge: 0 });
+  })();
+</script>
+{% endblock %}

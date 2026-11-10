@@ -4,10 +4,16 @@ from django.contrib.auth import login, logout
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.models import User
 from django.core.mail import send_mail
+from django.http import HttpResponseBadRequest
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils.encoding import force_bytes, force_str
-from django.utils.http import urlsafe_base64_decode, urlsafe_base64_encode
+from django.utils import timezone
+from django.utils.http import (
+    url_has_allowed_host_and_scheme,
+    urlsafe_base64_decode,
+    urlsafe_base64_encode,
+)
 from django.views.decorators.http import require_POST
 
 from accounts.forms import MoodLogForm, SignupForm, UserProfileForm
@@ -95,7 +101,49 @@ def verify_email(request, uidb64, token):
         request, user, backend="django.contrib.auth.backends.AllowAllUsersModelBackend"
     )
     messages.success(request, "Email confirmed. Welcome!")
-    return redirect("accounts:profile")
+    return redirect("accounts:capture_location")
+
+
+def _safe_next_url(request, value):
+    if value and url_has_allowed_host_and_scheme(
+        value, allowed_hosts={request.get_host()}, require_https=request.is_secure()
+    ):
+        return value
+    return reverse("accounts:profile")
+
+
+@login_required
+def capture_location(request):
+    """Ask the newly signed-in user's browser for a location update."""
+    next_url = _safe_next_url(
+        request,
+        request.POST.get("next")
+        if request.method == "POST"
+        else request.GET.get("next"),
+    )
+    if request.method == "POST":
+        try:
+            latitude = float(request.POST.get("latitude", ""))
+            longitude = float(request.POST.get("longitude", ""))
+        except (TypeError, ValueError):
+            return HttpResponseBadRequest("Invalid coordinates")
+        if not (-90 <= latitude <= 90 and -180 <= longitude <= 180):
+            return HttpResponseBadRequest("Invalid coordinates")
+
+        profile, _created = UserProfile.objects.get_or_create(user=request.user)
+        profile.last_location_latitude = latitude
+        profile.last_location_longitude = longitude
+        profile.last_location_updated_at = timezone.now()
+        profile.save(
+            update_fields=[
+                "last_location_latitude",
+                "last_location_longitude",
+                "last_location_updated_at",
+            ]
+        )
+        return redirect(next_url)
+
+    return render(request, "accounts/capture_location.html", {"next_url": next_url})
 
 
 @login_required

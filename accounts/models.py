@@ -38,6 +38,9 @@ class UserProfile(models.Model):
     promo_opt_in = models.BooleanField(
         default=False, verbose_name="Send me promotions and updates"
     )
+    last_location_latitude = models.FloatField(null=True, blank=True)
+    last_location_longitude = models.FloatField(null=True, blank=True)
+    last_location_updated_at = models.DateTimeField(null=True, blank=True)
     home_address = models.CharField(max_length=255, blank=True)
     age = models.PositiveIntegerField(null=True, blank=True)
     gender = models.CharField(max_length=32, blank=True, choices=GENDER_CHOICES)
